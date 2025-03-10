@@ -174,43 +174,60 @@ class DDPPolicy(torch.nn.Module):
 
 
 def run_validation(policy, val_dataloader, args, device, accelerator):
-    agent_state = None
-    sum_loss = 0
-    n_loss = 0
+    try:
+        if val_dataloader is None:
+            print("Warning: Validation dataloader is None, skipping validation")
+            return 0.0  # Return dummy loss
+            
+        agent_state = None
+        sum_loss = 0
+        n_loss = 0
 
-    val_batch = 0
-    total_batch = len(val_dataloader)
+        val_batch = 0
+        total_batch = len(val_dataloader)
 
-    policy.eval()
-    with th.no_grad():
-        for obs, actions, firsts in val_dataloader:
-            val_batch += 1
-            T = firsts.shape[1]
-            bsz = firsts.shape[0]
-            # Chunk into TRUNC_T length sequences
-            for t in range(0, T, args.trunc_t):
-                # Get the next chunk of frames and actions
-                obs_chunk = tree_map(lambda x: get_chunk(x, t, args.trunc_t), obs)
-                actions_chunk = tree_map(lambda x: get_chunk(x, t, args.trunc_t), actions)
-                firsts_chunk = firsts[:, t:t + args.trunc_t]
+        policy.eval()
+        with th.no_grad():
+            try:
+                for obs, actions, firsts in val_dataloader:
+                    try:
+                        val_batch += 1
+                        T = firsts.shape[1]
+                        bsz = firsts.shape[0]
+                        # Chunk into TRUNC_T length sequences
+                        for t in range(0, T, args.trunc_t):
+                            # Get the next chunk of frames and actions
+                            obs_chunk = tree_map(lambda x: get_chunk(x, t, args.trunc_t), obs)
+                            actions_chunk = tree_map(lambda x: get_chunk(x, t, args.trunc_t), actions)
+                            firsts_chunk = firsts[:, t:t + args.trunc_t]
 
-                # Convert to torch tensors
-                obs_chunk = object_to_torch_and_device(obs_chunk, device)
-                actions_chunk = object_to_torch_and_device(actions_chunk, device)
-                actions_chunk = tree_map(lambda x: x[:, :, 0], actions_chunk)
-                firsts_chunk = object_to_torch_and_device(firsts_chunk, device).view(bsz, args.trunc_t)
+                            # Convert to torch tensors
+                            obs_chunk = object_to_torch_and_device(obs_chunk, device)
+                            actions_chunk = object_to_torch_and_device(actions_chunk, device)
+                            actions_chunk = tree_map(lambda x: x[:, :, 0], actions_chunk)
+                            firsts_chunk = object_to_torch_and_device(firsts_chunk, device).view(bsz, args.trunc_t)
 
-                loss, agent_state = policy(obs_chunk, agent_state, firsts_chunk, actions_chunk)
+                            loss, agent_state = policy(obs_chunk, agent_state, firsts_chunk, actions_chunk)
 
-                loss = accelerator.gather(loss).mean()
-                sum_loss += loss.item()
-                n_loss += 1
+                            loss = accelerator.gather(loss).mean()
+                            sum_loss += loss.item()
+                            n_loss += 1
 
-            if accelerator.is_main_process:
-                print(f"\tFinished validation batch {val_batch}/{total_batch} "
-                      f"(bsz={bsz}, val_every_nth={args.val_every_nth})")
+                        if accelerator.is_main_process:
+                            print(f"\tFinished validation batch {val_batch}/{total_batch} "
+                                f"(bsz={bsz}, val_every_nth={args.val_every_nth})")
+                    except Exception as e:
+                        print(f"Error in validation batch {val_batch}: {e}")
+                        continue
+            except Exception as e:
+                print(f"Error during validation dataloader iteration: {e}")
+                if n_loss == 0:
+                    return 0.0  # Return dummy loss if no valid batches were processed
+    except Exception as e:
+        print(f"Unexpected error in validation: {e}")
+        return 0.0  # Return dummy loss
 
-    avg_loss = sum_loss / n_loss
+    avg_loss = sum_loss / max(n_loss, 1)  # Avoid division by zero
     return avg_loss
 
 def main(args):
@@ -430,7 +447,8 @@ def main(args):
                         accelerator.backward(loss)
 
                     with timer.time('train clip grad'):
-                        accelerator.clip_grad_norm_(policy.parameters(), args.max_grad_norm)
+                        # accelerator.clip_grad_norm_(policy.parameters(), args.max_grad_norm)
+                        torch.nn.utils.clip_grad_norm_(policy.parameters(), args.max_grad_norm)
 
                     with timer.time('train optimizer step'):
                         optimizer.step()

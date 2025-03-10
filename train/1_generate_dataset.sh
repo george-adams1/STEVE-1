@@ -1,5 +1,9 @@
 # This will download the dataset from OpenAI to a local directory and convert it to the format used by the code.
 
+source /opt/conda/bin/activate minedojo
+export PYTHONNOUSERSITE=1
+export PYTHONPATH=/scratch/georgea/pip_packages:$PYTHONPATH
+
 OUTPUT_DIR_CONTRACTOR=data/dataset_contractor/
 # IMPORTANT: Increase the value of N_EPISODES_CONTRACTOR if you want to
 # download more contractor episodes from the publicly available VPT dataset.

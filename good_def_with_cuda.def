@@ -1,0 +1,104 @@
+Bootstrap: docker
+From: ubuntu:18.04
+
+%files
+    . /opt/steve1
+
+%post
+    # Install system dependencies and Java 8
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        build-essential \
+        openjdk-8-jdk \
+        openjdk-8-jre \
+        patch \
+        git \
+        wget \
+        curl \
+        unzip \
+        libopenmpi-dev \
+        openmpi-bin \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Set Java environment
+    export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+    export PATH=$JAVA_HOME/bin:$PATH
+
+    # Verify Java installation
+    java -version
+    echo "JAVA_HOME is set to: $JAVA_HOME"
+
+    # Install Miniconda
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+    bash miniconda.sh -b -p /opt/conda
+    rm miniconda.sh
+
+    # Add conda to path
+    export PATH=/opt/conda/bin:$PATH
+
+    # Create conda environment with Python 3.10
+    /opt/conda/bin/conda create -n minedojo python=3.10 -y
+
+    # Make conda commands available
+    export PATH=/opt/conda/bin:/opt/conda/envs/minedojo/bin:$PATH
+
+    # Initialize conda in current shell
+    eval "$(/opt/conda/bin/conda shell.bash hook)"
+    conda activate minedojo
+
+    # Install specific versions of setuptools, pip, and wheel for gym compatibility
+    pip install setuptools==65.5.0 pip==21 wheel==0.38.0
+
+    # 1. Install PyTorch 2.0
+    conda install -y pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
+
+    # 2. Install MineDojo and MineCLIP
+    pip install minedojo git+https://github.com/MineDojo/MineCLIP
+
+    # Install Gradle
+    cd /opt
+    wget https://services.gradle.org/distributions/gradle-6.8.3-bin.zip
+    unzip -q gradle-6.8.3-bin.zip
+    mv gradle-6.8.3 gradle
+    export GRADLE_HOME=/opt/gradle
+    export PATH=${GRADLE_HOME}/bin:${PATH}
+
+    # Verify Gradle installation
+    gradle --version
+
+    # Create workspace directory for MineRL
+    mkdir -p /workspace
+    cd /workspace
+
+    # Clone MineRL and prepare directories
+    git clone -b v1.0.1 https://github.com/minerllabs/minerl.git
+    cd minerl
+    mkdir -p src/main/resources
+    chmod -R 777 .
+
+    # 3. Install MineRL with verbose output
+    JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 pip install -v -e .
+
+    # 4. Install VPT requirements
+    pip install gym==0.19 gym3 attrs opencv-python pytorch-warmup warmup-scheduler-pytorch
+
+    # 5. Install additional requirements
+    pip install gdown tqdm accelerate==0.18.0 wandb==0.15.12 matplotlib numpy pandas seaborn
+
+    # 6. Install steve1
+    cd /opt/steve1 && pip install -e .
+
+%environment
+    export CONDA_DEFAULT_ENV=minedojo
+    export PATH=/opt/conda/envs/minedojo/bin:$PATH
+    export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+    export PATH=$JAVA_HOME/bin:$PATH
+    export GRADLE_HOME=/opt/gradle
+    export PATH=${GRADLE_HOME}/bin:${PATH}
+
+%runscript
+    exec "$@"
+
+%test
+    java -version
+    echo $JAVA_HOME
+    python -c "import minerl; print('MineRL import successful')"

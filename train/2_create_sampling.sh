@@ -1,3 +1,7 @@
+source /opt/conda/bin/activate minedojo
+export PYTHONNOUSERSITE=1
+export PYTHONPATH=/scratch/georgea/pip_packages:$PYTHONPATH
+
 python steve1/data/sampling/generate_sampling.py \
 --type neurips \
 --name neurips \
